@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Unipulse</title>
+<style>
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html { background:#f2f2f2; }
+  body { margin:0 auto; max-width:420px; min-height:100vh; background:#fff; color:#000; font-family:Arial, Helvetica, sans-serif; font-size:15px; border-left:1px solid #ccc; border-right:1px solid #ccc; }
+  header { position:sticky; top:0; background:#fff; text-align:center; font-family:"Times New Roman", Times, serif; font-weight:bold; font-size:22px; padding:10px 0; border-top:1px solid #000; border-bottom:1px solid #000; z-index:5; }
+  #app { padding:14px 14px 80px; }
+  h1 { font-size:18px; margin:6px 0 10px; font-weight:bold; text-transform:uppercase; }
+  .title { font-size:18px; font-weight:bold; margin:6px 0 8px; }
+  label.t { display:block; font-weight:bold; font-size:14px; margin:14px 0 6px; }
+  input[type=text], input[type=email], input[type=password], select, textarea { width:100%; padding:8px; border:1px solid #000; font-size:16px; background:#fff; border-radius:0; font-family:inherit; }
+  textarea { height:140px; resize:none; }
+  button { cursor:pointer; border:0; background:#ccc; color:#000; padding:8px 18px; font-size:15px; border-radius:0; font-family:inherit; }
+  button:disabled { opacity:.5; cursor:default; }
+  button.full { width:100%; margin-top:14px; padding:10px; }
+  button.small { padding:3px 8px; font-size:12px; }
+  .pill { display:inline-block; background:#ccc; border-radius:16px; padding:6px 16px; cursor:pointer; font-size:15px; }
+  .pill input { display:none; }
+  .fname { margin-left:8px; font-size:13px; color:#555; }
+  .btns { display:flex; gap:12px; margin-top:16px; }
+  .err { color:#b00020; margin-top:10px; font-size:13px; }
+  .link { text-align:center; margin-top:16px; cursor:pointer; font-size:14px; text-decoration:underline; }
+  .empty { text-align:center; color:#777; padding:30px 0; font-size:14px; }
+
+  .post { margin-bottom:18px; }
+  .head { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+  .av { width:40px; height:40px; flex:none; }
+  .un { font-size:15px; line-height:1.2; }
+  .co { font-size:14px; line-height:1.2; color:#222; }
+  .cap { font-family:"Times New Roman", Times, serif; font-size:14px; margin:4px 0 4px 2px; word-break:break-word; }
+  .frame { border:1px solid #000; }
+  .frame img { display:block; width:100%; height:auto; cursor:pointer; background:#fafafa; }
+  .actions { display:flex; justify-content:flex-end; gap:6px; margin-top:4px; }
+  .cap input { font-family:Arial, sans-serif; font-size:16px; }
+
+  .pr { font-size:19px; line-height:1.45; }
+  .pr u { text-decoration:underline; }
+
+  nav { position:fixed; bottom:0; left:50%; transform:translateX(-50%); width:100%; max-width:420px; background:#fff; border-top:1px solid #000; display:none; }
+  nav a { flex:1; text-align:center; padding:15px 0; text-decoration:none; color:#000; font-size:16px; border-left:1px solid #000; }
+  nav a:first-child { border-left:0; }
+  nav a.on { font-weight:bold; background:#eee; }
+</style>
+</head>
+<body>
+<header>Unipulse</header>
+<div id="app"></div>
+<nav id="nav"></nav>
+<script src="config.js"></script>
+<script>
+/* ================= SETTINGS ================= */
+const API = window.UNIPULSE_CONFIG.api;
+const BLOB = window.UNIPULSE_CONFIG.blob;
+
+/* ================= HELPERS ================= */
+const app = document.getElementById("app");
+const nav = document.getElementById("nav");
+let ME = null;
+try { ME = JSON.parse(localStorage.getItem("unipulseUser") || "null"); } catch (e) {}
+let CACHE = [];
+let authMode = "login";
+
+function el(tag, props, ...kids) {
+  const e = document.createElement(tag);
+  props = props || {};
+  for (const k in props) {
+    if (k === "class") e.className = props[k];
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), props[k]);
+    else if (k === "value") e.value = props[k];
+    else e.setAttribute(k, props[k]);
+  }
+  kids.flat().forEach(c => {
+    if (c === null || c === undefined || c === false) return;
+    e.append(c.nodeType ? c : document.createTextNode(String(c)));
+  });
+  return e;
+}
+
+function avatar() {
+  const s = el("span", { class: "av" });
+  s.innerHTML = '<svg class="av" viewBox="0 0 40 40" fill="none" stroke="#000" stroke-width="1.5">' +
+    '<circle cx="20" cy="20" r="18.5"/><circle cx="20" cy="15" r="5.5"/>' +
+    '<path d="M9 31c1-6 5-9 11-9s10 3 11 9"/></svg>';
+  return s;
+}
+
+async function call(url, opts) {
+  let res;
+  try { res = await fetch(url, opts); }
+  catch (err) { throw new Error("network/CORS"); }
+  if (!res.ok) throw new Error(String(res.status));
+  return res;
+}
+
+function withId(url, id) {
+  return url.replace(/%7Bid%7D|\{id\}/i, encodeURIComponent(id));
+}
+
+function saveMe(u) {
+  ME = u;
+  if (u) localStorage.setItem("unipulseUser", JSON.stringify(u));
+  else localStorage.removeItem("unipulseUser");
+}
+
+function goHome() { location.hash = "#/home"; route(); }
+
+/* SHA-256 (same result as crypto.subtle, works everywhere) */
+function sha256(str) {
+  const bytes = new TextEncoder().encode(str);
+  const K = [
+    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+  ];
+  let H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  const l = bytes.length;
+  const padLen = ((l + 9 + 63) >> 6) << 6;
+  const buf = new Uint8Array(padLen);
+  buf.set(bytes);
+  buf[l] = 0x80;
+  const dv = new DataView(buf.buffer);
+  dv.setUint32(padLen - 8, Math.floor((l * 8) / 4294967296));
+  dv.setUint32(padLen - 4, (l * 8) >>> 0);
+  const w = new Uint32Array(64);
+  for (let i = 0; i < padLen; i += 64) {
+    for (let t = 0; t < 16; t++) w[t] = dv.getUint32(i + t * 4);
+    for (let t = 16; t < 64; t++) {
+      const a = w[t - 15], b = w[t - 2];
+      const s0 = ((a >>> 7) | (a << 25)) ^ ((a >>> 18) | (a << 14)) ^ (a >>> 3);
+      const s1 = ((b >>> 17) | (b << 15)) ^ ((b >>> 19) | (b << 13)) ^ (b >>> 10);
+      w[t] = (w[t - 16] + s0 + w[t - 7] + s1) >>> 0;
+    }
+    let [a, b, c, d, e, f, g, h] = H;
+    for (let t = 0; t < 64; t++) {
+      const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+      const ch = (e & f) ^ (~e & g);
+      const t1 = (h + S1 + ch + K[t] + w[t]) >>> 0;
+      const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const t2 = (S0 + maj) >>> 0;
+      h = g; g = f; f = e; e = (d + t1) >>> 0;
+      d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+    }
+    H = [a, b, c, d, e, f, g, h].map((x, j) => (H[j] + x) >>> 0);
+  }
+  return H.map(x => x.toString(16).padStart(8, "0")).join("");
+}
+const hashPw = (email, pw) => sha256(email + ":" + pw);
+
+/* posts helpers */
+function toList(d) {
+  if (Array.isArray(d)) return d;
+  if (d && Array.isArray(d.value)) return d.value;
+  if (d && Array.isArray(d.Documents)) return d.Documents;
+  if (d && Array.isArray(d.documents)) return d.documents;
+  return [];
+}
+function imgUrl(p) {
+  const path = p.filePath || "";
+  if (/^https?:/i.test(path)) return path;
+  return BLOB + (path.startsWith("/") ? "" : "/") + path;
+}
+const capOf = p => p.caption || p.fileName || "";
+
+/* userName is saved as "Name|Course" so every post can show the course */
+function who(p) {
+  const parts = String(p.userName || "Unknown").split("|");
+  return { name: parts[0].trim() || "Unknown", course: (parts[1] || "").trim() };
+}
+
+async function getAll() {
+  const res = await call(API.all, { method: "GET" });
+  const data = await res.json();
+  CACHE = toList(data).filter(p => p && p.id);
+  CACHE.sort((a, b) => (b._ts || 0) - (a._ts || 0));
+  return CACHE;
+}
+
+/* tiny transparent picture, used when a post has no image */
+function emptyImage() {
+  return new Promise(resolve => {
+    const c = document.createElement("canvas");
+    c.width = 1; c.height = 1;
+    c.toBlob(b => resolve(new File([b], "text-post.png", { type: "image/png" })), "image/png");
+  });
+}
+
+/* ================= AUTH PAGE ================= */
+function authPage() {
+  app.innerHTML = "";
+  const isReg = authMode === "register";
+  const msg = el("div", { class: "err" });
+
+  const name = el("input", { type: "text", placeholder: "Your name" });
+  const email = el("input", { type: "email", placeholder: "you@ulster.ac.uk" });
+  const pw = el("input", { type: "password", placeholder: "At least 6 characters" });
+  const sex = el("select", {}, ["Male", "Female", "Other"].map(s => el("option", { value: s }, s)));
+  const subject = el("input", { type: "text", placeholder: "e.g. Computing System" });
+  const year = el("input", { type: "text", placeholder: "e.g. Sep 2024" });
+  const btn = el("button", { class: "full" }, isReg ? "CREATE ACCOUNT" : "LOG IN");
+
+  async function submit() {
+    msg.textContent = "";
+    const mail = email.value.trim().toLowerCase();
+    if (!mail.includes("@")) { msg.textContent = "Enter a valid email."; return; }
+    if (pw.value.length < 6) { msg.textContent = "Password must be at least 6 characters."; return; }
+    if (isReg && !name.value.trim()) { msg.textContent = "Enter your name."; return; }
+    btn.disabled = true;
+    btn.textContent = "PLEASE WAIT...";
+    try {
+      const hash = hashPw(mail, pw.value);
+      if (isReg) {
+        const doc = {
+          id: mail, userID: mail, name: name.value.trim(), mail: mail,
+          sex: sex.value, subject: subject.value.trim(), year: year.value.trim(), passwordHash: hash
+        };
+        const fd = new FormData();
+        fd.append("doc", JSON.stringify(doc));
+        await call(API.register, { method: "POST", body: fd });
+        delete doc.passwordHash;
+        saveMe(doc);
+      } else {
+        const fd = new FormData();
+        fd.append("email", mail);
+        fd.append("hash", hash);
+        const res = await call(API.login, { method: "POST", body: fd });
+        const u = await res.json();
+        saveMe({
+          id: u.id || mail, userID: u.id || mail, name: u.name || "", mail: u.mail || mail,
+          sex: u.sex || "", subject: u.subject || "", year: u.year || ""
+        });
+      }
+      goHome();
+    } catch (e) {
+      if (isReg) msg.textContent = "Could not register (" + e.message + "). This email may already exist.";
+      else if (e.message === "401" || e.message === "404") msg.textContent = "Wrong email or password.";
+      else msg.textContent = "Login failed (" + e.message + ").";
+      btn.disabled = false;
+      btn.textContent = isReg ? "CREATE ACCOUNT" : "LOG IN";
+    }
+  }
+  btn.addEventListener("click", submit);
+
+  app.append(el("div", {},
+    el("div", { class: "title" }, isReg ? "Create account" : "Log in"),
+    isReg ? [el("label", { class: "t" }, "Name"), name] : null,
+    el("label", { class: "t" }, "Email"), email,
+    el("label", { class: "t" }, "Password"), pw,
+    isReg ? [
+      el("label", { class: "t" }, "Sex"), sex,
+      el("label", { class: "t" }, "Subject"), subject,
+      el("label", { class: "t" }, "Year started"), year
+    ] : null,
+    btn, msg,
+    el("div", { class: "link", onclick: () => { authMode = isReg ? "login" : "register"; authPage(); } },
+      isReg ? "Already have an account? Log in" : "New here? Create an account")
+  ));
+}
+
+/* ================= POST CARD ================= */
+/* mode: "home" (no buttons), "profile" or "detail" (Edit + Delete for own posts) */
+function card(p, mode, onGone) {
+  const box = el("div", { class: "post" });
+  let editing = false;
+
+  function draw() {
+    box.innerHTML = "";
+    const w = who(p);
+    const mine = ME && p.userID === ME.id;
+
+    box.append(el("div", { class: "head" },
+      avatar(),
+      el("div", {}, el("div", { class: "un" }, w.name), el("div", { class: "co" }, w.course || "Student"))
+    ));
+
+    if (editing) {
+      const inp = el("input", { type: "text", value: capOf(p) });
+      box.append(el("div", { class: "cap" }, inp));
+      const msg = el("div", { class: "err" });
+      const save = el("button", { class: "small" }, "Save");
+      const cancel = el("button", { class: "small" }, "Cancel");
+      cancel.addEventListener("click", () => { editing = false; draw(); });
+      save.addEventListener("click", async () => {
+        save.disabled = true; msg.textContent = "";
+        try {
+          const body = {};
+          for (const k in p) if (!k.startsWith("_")) body[k] = p[k];
+          body.caption = inp.value.trim();
+          body.fileName = inp.value.trim();
+          await call(withId(API.update, p.id), {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body)
+          });
+          p.caption = body.caption; p.fileName = body.fileName;
+          editing = false; draw();
+        } catch (e) {
+          msg.textContent = "Could not save (" + e.message + ")";
+          save.disabled = false;
+        }
+      });
+      box.append(el("div", { class: "actions" }, save, cancel), msg);
+    } else {
+      box.append(el("div", { class: "cap" }, capOf(p)));
+    }
+
+    const img = el("img", { src: imgUrl(p), alt: "" });
+    const frame = el("div", { class: "frame" }, img);
+    img.addEventListener("load", () => { if (img.naturalWidth <= 1) frame.remove(); });
+    img.addEventListener("error", () => frame.remove());
+    if (mode !== "detail") {
+      img.addEventListener("click", () => { location.hash = "#/p/" + encodeURIComponent(p.id); });
+    }
+    box.append(frame);
+
+    if (!editing && mine && (mode === "profile" || mode === "detail")) {
+      const msg = el("div", { class: "err" });
+      const edit = el("button", { class: "small" }, "Edit");
+      const del = el("button", { class: "small" }, "Delete");
+      edit.addEventListener("click", () => { editing = true; draw(); });
+      del.addEventListener("click", async () => {
+        if (!confirm("Delete this post?")) return;
+        del.disabled = true;
+        try {
+          await call(withId(API.remove, p.id), { method: "DELETE" });
+          CACHE = CACHE.filter(x => x.id !== p.id);
+          box.remove();
+          if (onGone) onGone();
+        } catch (e) {
+          msg.textContent = "Could not delete (" + e.message + ")";
+          del.disabled = false;
+        }
+      });
+      box.append(el("div", { class: "actions" }, edit, del), msg);
+    }
+  }
+  draw();
+  return box;
+}
+
+/* ================= PAGES ================= */
+async function home() {
+  app.innerHTML = "";
+  const holder = el("div", {}, el("div", { class: "empty" }, "Loading..."));
+  app.append(holder);
+  try {
+    const posts = await getAll();
+    holder.innerHTML = "";
+    if (!posts.length) holder.append(el("div", { class: "empty" }, "No posts yet. Be the first!"));
+    posts.forEach(p => holder.append(card(p, "home")));
+  } catch (e) {
+    holder.innerHTML = "";
+    holder.append(el("div", { class: "err" }, "Could not load posts (" + e.message + ")"));
+  }
+}
+
+function postPage() {
+  app.innerHTML = "";
+  const text = el("textarea", { placeholder: "Whats on your mind??" });
+  const file = el("input", { type: "file", accept: "image/*" });
+  const fname = el("span", { class: "fname" }, "");
+  const msg = el("div", { class: "err" });
+  const post = el("button", {}, "POST");
+  const cancel = el("button", {}, "CANCEL");
+
+  file.addEventListener("change", () => {
+    fname.textContent = file.files[0] ? file.files[0].name : "";
+  });
+  cancel.addEventListener("click", goHome);
+
+  post.addEventListener("click", async () => {
+    msg.textContent = "";
+    const t = text.value.trim();
+    if (!t) { msg.textContent = "Write something first."; return; }
+    post.disabled = true; post.textContent = "POSTING...";
+    try {
+      const f = file.files[0] || await emptyImage();
+      const fd = new FormData();
+      fd.append("FileName", t);
+      fd.append("caption", t);
+      fd.append("userID", ME.id);
+      fd.append("userName", ME.name + "|" + (ME.subject || ""));
+      fd.append("File", f);
+      await call(API.create, { method: "POST", body: fd });
+      goHome();
+    } catch (e) {
+      msg.textContent = "Could not post (" + e.message + ")";
+      post.disabled = false; post.textContent = "POST";
+    }
+  });
+
+  app.append(
+    el("div", { class: "title" }, "Create Post"),
+    text,
+    el("label", { class: "t" }, "Add an image (optional)"),
+    el("label", { class: "pill" }, "Choose img", file), fname,
+    el("div", { class: "btns" }, post, cancel),
+    msg
+  );
+}
+
+async function profile() {
+  app.innerHTML = "";
+  app.append(
+    el("h1", {}, "My Profile"),
+    el("div", { class: "pr" },
+      el("div", {}, "Name: " + ME.name),
+      el("div", {}, "Mail: ", el("u", {}, ME.mail)),
+      el("div", {}, "Sex: " + (ME.sex || "-")),
+      el("div", {}, "Subject: " + (ME.subject || "-")),
+      el("div", {}, "Year Started: " + (ME.year || "-"))
+    ),
+    el("div", { style: "margin-top:10px" },
+      el("button", { class: "small", onclick: () => { saveMe(null); location.hash = "#/home"; route(); } }, "Log out")
+    ),
+    el("h1", { style: "margin-top:22px" }, "Posts")
+  );
+  const holder = el("div", {}, el("div", { class: "empty" }, "Loading..."));
+  app.append(holder);
+  try {
+    const posts = (await getAll()).filter(p => p.userID === ME.id);
+    holder.innerHTML = "";
+    if (!posts.length) { holder.append(el("div", { class: "empty" }, "You have no posts yet.")); return; }
+    posts.forEach(p => holder.append(card(p, "profile")));
+  } catch (e) {
+    holder.innerHTML = "";
+    holder.append(el("div", { class: "err" }, "Could not load posts (" + e.message + ")"));
+  }
+}
+
+async function detail(id) {
+  app.innerHTML = "";
+  app.append(el("button", { class: "small", onclick: () => history.back() }, "Back"));
+  const holder = el("div", { style: "margin-top:12px" }, el("div", { class: "empty" }, "Loading..."));
+  app.append(holder);
+  let p = null;
+  try {
+    const res = await call(withId(API.one, id), { method: "GET" });
+    p = await res.json();
+  } catch (e) {
+    p = CACHE.find(x => x.id === id) || null;
+  }
+  holder.innerHTML = "";
+  if (!p || !p.id) { holder.append(el("div", { class: "err" }, "Post not found.")); return; }
+  holder.append(card(p, "detail", goHome));
+}
+
+/* ================= ROUTER ================= */
+function drawNav() {
+  nav.style.display = ME ? "flex" : "none";
+  nav.innerHTML = "";
+  const h = location.hash || "#/home";
+  [["#/home", "HOME"], ["#/post", "POST"], ["#/profile", "PROFILE"]].forEach(([href, label]) => {
+    let on = h.startsWith(href);
+    if (href === "#/home" && h.startsWith("#/p/")) on = true;
+    nav.append(el("a", { href: href, class: on ? "on" : "" }, label));
+  });
+}
+
+function route() {
+  drawNav();
+  const h = location.hash || "#/home";
+  if (!ME) { authPage(); return; }
+  if (h.startsWith("#/post")) postPage();
+  else if (h.startsWith("#/profile")) profile();
+  else if (h.startsWith("#/p/")) detail(decodeURIComponent(h.slice(4)));
+  else home();
+}
+
+window.addEventListener("hashchange", route);
+window.addEventListener("load", route);
+</script>
+</body>
+</html>
