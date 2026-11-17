@@ -8,6 +8,7 @@ window.UNIPULSE_CONFIG = {
     remove: "PASTE_DELETE_POST_URL",
     register: "PASTE_REGISTER_URL",
     login: "PASTE_LOGIN_URL",
-    check: "PASTE_FUNCTION_URL"
+    check: "PASTE_FUNCTION_URL",
+    translate: "PASTE_TRANSLATE_URL"
   }
 };

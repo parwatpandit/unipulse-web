@@ -320,6 +320,24 @@ function card(p, mode, onGone) {
       box.append(el("div", { class: "actions" }, save, cancel), msg);
     } else {
       box.append(el("div", { class: "cap" }, capOf(p)));
+const lang = el("select", { style: "width:auto;font-size:12px;padding:3px" },
+  [["ne", "Nepali"], ["hi", "Hindi"], ["es", "Spanish"], ["fr", "French"]]
+    .map(([v, n]) => el("option", { value: v }, n)));
+const tr = el("button", { class: "small" }, "Translate");
+const out = el("div", { class: "cap" });
+tr.addEventListener("click", async () => {
+  tr.disabled = true;
+  out.textContent = "Translating...";
+  try {
+    const r = await fetch(API.translate + "?text=" + encodeURIComponent(capOf(p)) + "&to=" + lang.value);
+    const d = await r.json();
+    out.textContent = d.translated || "Could not translate";
+  } catch (e) {
+    out.textContent = "Could not translate";
+  }
+  tr.disabled = false;
+});
+box.append(el("div", { class: "actions" }, lang, tr), out);
     }
 
     const img = el("img", { src: imgUrl(p), alt: "" });
