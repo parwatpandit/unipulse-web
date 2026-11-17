@@ -100,6 +100,14 @@ async function call(url, opts) {
 function withId(url, id) {
   return url.replace(/%7Bid%7D|\{id\}/i, encodeURIComponent(id));
 }
+async function checkCaption(text) {
+  try {
+    const r = await fetch(API.check + "?caption=" + encodeURIComponent(text));
+    return await r.json();
+  } catch (e) {
+    return { ok: true };
+  }
+}
 
 function saveMe(u) {
   ME = u;
@@ -378,11 +386,18 @@ function postPage() {
   });
   cancel.addEventListener("click", goHome);
 
+  // post.addEventListener("click", async () => {
+  //   msg.textContent = "";
+  //   const t = text.value.trim();
+  //   if (!t) { msg.textContent = "Write something first."; return; }
+  //   post.disabled = true; post.textContent = "POSTING...";
   post.addEventListener("click", async () => {
-    msg.textContent = "";
-    const t = text.value.trim();
-    if (!t) { msg.textContent = "Write something first."; return; }
-    post.disabled = true; post.textContent = "POSTING...";
+  msg.textContent = "";
+  const t = text.value.trim();
+  if (!t) { msg.textContent = "Write something first."; return; }
+  const check = await checkCaption(t);
+  if (!check.ok) { msg.textContent = check.reason; return; }
+  post.disabled = true; post.textContent = "POSTING...";
     try {
       const f = file.files[0] || await emptyImage();
       const fd = new FormData();
