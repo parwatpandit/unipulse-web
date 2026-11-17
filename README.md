@@ -171,7 +171,7 @@ A pipeline will build `config.js` from secret variables and copy `src/` to `$web
 - [x] Register and login
 - [x] Static website hosting
 - [ ] CI/CD pipeline
-- [ ] Azure Function (advanced feature)
+- [x] Azure Function (advanced feature)
 - [ ] Translator or Q&A (advanced feature)
 
 ## Project structure
