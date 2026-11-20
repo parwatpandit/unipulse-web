@@ -1,6 +1,7 @@
 # UniPulse
 
 **A small social network for university students, built entirely on Azure.**
+
 **Link: https://unipulse2026pp.z55.web.core.windows.net/**
 
 Students create an account, share what is on their mind with an optional photo, and see what their course mates are posting. There is no server to manage: the website is static and every action goes through a serverless REST API.
